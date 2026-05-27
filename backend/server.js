@@ -242,16 +242,25 @@ io.on('connection', socket => {
     });
 
     // ── Start Game (host only) ────────────────────────────────────────────────
-    // Server uses its OWN card data — no cardData from client needed
-    socket.on('start-game', () => {
+    // Server uses its own JSON card data; falls back to client-provided cardData
+    // if server JSONs are empty (e.g. Codespaces without JSON files pushed)
+    socket.on('start-game', ({ cardData } = {}) => {
         const room = getRoom(socket.roomCode);
         if (!room) return socket.emit('error', 'Room not found.');
         if (room.hostId !== socket.id) return socket.emit('error', 'Only host can start.');
         if (room.players.length < 2) return socket.emit('error', 'Need at least 2 players.');
 
-        const cards = CARD_DATA[room.level] || CARD_DATA[1];
+        // Try server's own JSON first; fall back to client-provided cardData
+        let cards = CARD_DATA[room.level]?.length > 0 ? CARD_DATA[room.level] : (CARD_DATA[1]?.length > 0 ? CARD_DATA[1] : []);
+
+        if (cards.length < room.players.length && Array.isArray(cardData) && cardData.length >= room.players.length) {
+            // Use client-provided cards (normalise them to our internal format)
+            cards = cardData.map(normaliseCard);
+            console.log(`[GAME] Using client-provided cards (${cards.length}) for room ${room.code}`);
+        }
+
         if (cards.length < room.players.length) {
-            return socket.emit('error', `Not enough cards (${cards.length}) for ${room.players.length} players.`);
+            return socket.emit('error', `Not enough cards (${cards.length}) for ${room.players.length} players. Push JSON files to server.`);
         }
 
         room.state = 'playing';
